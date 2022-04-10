@@ -1,4 +1,4 @@
-<img align="right" src="https://raw.githubusercontent.com/dof2bot/scara/master/docs/scara_logo.png" width="25%">
+<img align="right" src="https://github.com/dof2bot/scara/blob/master/docs/scara_logo.png" width="25%">
 
 # scara
 
