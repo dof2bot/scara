@@ -10,7 +10,8 @@ The README is used to introduce the tool and provide instructions on
 how to install the tool, any machine dependencies it may have and any
 other information that should be provided before the tool is installed.
 
-<!-- START doctoc -->
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
 **Table of Contents**
 
 - [Installation](#installation)
@@ -18,8 +19,9 @@ other information that should be provided before the tool is installed.
 - [Dependencies](#dependencies)
 - [Project structure](#project-structure)
 - [Docs](#docs)
-- [Copyright and Licence](#copyright-and-licence)
-<!-- END doctoc -->
+- [Copyright and licence](#copyright-and-licence)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
 ### Installation
 
