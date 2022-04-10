@@ -1,0 +1,16 @@
+name: scara triage label
+on:
+  issues:
+    types: [opened]
+jobs:
+  applyTriageLabel:
+    name: scara triage label
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: scara triage label
+        uses: actions/github@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: label triage

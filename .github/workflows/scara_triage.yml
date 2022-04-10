@@ -1,0 +1,16 @@
+name: scara triage
+on:
+  issues:
+    types: [opened]
+jobs:
+  commentOnNewIssues:
+    name: scara triage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: scara triage
+        uses: actions/github@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: comment "[scara] should be supported for Marlin 2.0"
