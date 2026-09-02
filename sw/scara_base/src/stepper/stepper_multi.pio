@@ -1,0 +1,65 @@
+;
+; stepper_multi.pio
+; Copyright (C) 2026 Vladimir Roncevic <elektron.ronca@gmail.com>
+;
+; scara-base is free software: you can redistribute it and/or modify it
+; under the terms of the GNU General Public License as published by the
+; Free Software Foundation, either version 3 of the License, or
+; (at your option) any later version.
+;
+
+.program stepper_multi
+.side_set 4 opt
+
+; 32-bit word format from FIFO:
+; [Bit 31..28]: DIR bits for axes (J1, J2, Z, E)
+; [Bit 27..24]: STEP pulse mask (side-set)
+; [Bit 23..0] : Delay cycle count in X register
+
+.wrap_target
+    pull block              ; Wait for next 32-bit motion command word
+    out pins, 4             ; Set DIR pins for all 4 axes
+    out null, 4             ; Reserved / padding
+    out x, 24       side 0xF ; Set STEP pins HIGH and load delay cycles to X
+delay_high:
+    jmp x-- delay_high      ; Keep pulse HIGH for specified duration
+    nop             side 0x0 ; Reset STEP pins to LOW
+.wrap
+
+% c-sdk {
+#include "hardware/clocks.h"
+#include "hardware/gpio.h"
+
+static inline void stepper_multi_program_init(
+    PIO pio,
+    uint sm,
+    uint offset,
+    uint dir_base_pin,
+    uint step_base_pin
+) {
+    pio_sm_config c = stepper_multi_program_get_default_config(offset);
+
+    /* Configure OUT pins for Direction (4 consecutive pins) */
+    sm_config_set_out_pins(&c, dir_base_pin, 4);
+
+    /* Configure SIDE-SET pins for Step pulses (4 consecutive pins) */
+    sm_config_set_sideset_pins(&c, step_base_pin);
+
+    /* Shift out 32 bits, MSB first, manual pull */
+    sm_config_set_out_shift(&c, false, false, 32);
+
+    /* Initialize GPIOs for PIO control */
+    for (uint i = 0; i < 4; i++) {
+        pio_gpio_init(pio, dir_base_pin + i);
+        pio_gpio_init(pio, step_base_pin + i);
+    }
+
+    /* Set GPIO directions to output */
+    pio_sm_set_consecutive_pindirs(pio, sm, dir_base_pin, 4, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, step_base_pin, 4, true);
+
+    /* Load configuration and start SM */
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}

@@ -1,0 +1,41 @@
+name: scara_base Build
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'sw/scara_base/**'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'sw/scara_base/**'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Install ARM GCC Toolchain and CMake
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi build-essential cmake
+
+      - name: Checkout Pico SDK
+        run: |
+          git clone --recurse-submodules https://github.com/raspberrypi/pico-sdk.git /tmp/pico-sdk
+
+      - name: Build scara_base Firmware
+        env:
+          PICO_SDK_PATH: /tmp/pico-sdk
+        run: |
+          cd sw/scara_base
+          mkdir -p build && cd build
+          cmake ..
+          make -j$(nproc)
+
+      - name: Upload UF2 Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: scara-base-uf2
+          path: sw/scara_base/build/src/scara-base.uf2

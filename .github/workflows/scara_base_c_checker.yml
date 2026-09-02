@@ -1,0 +1,33 @@
+name: scara_base C checker
+on:
+  push:
+    branches: [ master ]
+    paths:
+      - 'sw/scara_base/src/**/*.c'
+      - 'sw/scara_base/src/**/*.h'
+  pull_request:
+    branches: [ master ]
+    paths:
+      - 'sw/scara_base/src/**/*.c'
+      - 'sw/scara_base/src/**/*.h'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Check length of line in modules
+        id: long_line_checker
+        run: |
+          echo "Checking the length of lines in modules"
+          modules_ok=0
+          modules=($(find sw/scara_base/src/ -type f -name '*.c' -exec echo '{}' \;))
+          for mod in "${modules[@]}"; do line_length=$(wc -L < "${mod}"); echo "${mod} : $line_length"; [[ $line_length -gt 300 ]] && modules_ok=1; done
+          [[ $modules_ok -eq 0 ]] && echo "All modules are good" || exit 1
+      - name: Check number of lines in modules
+        id: num_line_checker
+        run: |
+          echo "Checking the number of lines in modules"
+          modules_ok=0
+          modules=($(find sw/scara_base/src/ -type f -name '*.c' -exec echo '{}' \;))
+          for mod in "${modules[@]}"; do line_numbers=$(wc -l < "${mod}"); echo "${mod} : $line_numbers"; [[ $line_numbers -gt 300 ]] && modules_ok=1; done
+          [[ $modules_ok -eq 0 ]] && echo "All modules are good" && exit 0 || exit 1

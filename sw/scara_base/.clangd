@@ -1,0 +1,14 @@
+CompilationDatabase:
+  Directory: "/data/dev/raspberry/scara/github/scara/sw/scara_base/build"
+
+Diagnostics:
+  UnusedIncludes: None
+
+CompileFlags:
+  Add:
+    - "-isystem"
+    - "/usr/lib/arm-none-eabi/include"
+    - "-isystem"
+    - "/usr/lib/gcc/arm-none-eabi/13.2.1/include"
+    - "-isystem"
+    - "/usr/lib/gcc/arm-none-eabi/13.2.1/include-fixed"
