@@ -5,11 +5,13 @@ on:
     paths:
       - 'sw/scara_base/src/**/*.c'
       - 'sw/scara_base/src/**/*.h'
+      - '.github/workflows/scara_base_c_checker.yml'
   pull_request:
     branches: [ master ]
     paths:
       - 'sw/scara_base/src/**/*.c'
       - 'sw/scara_base/src/**/*.h'
+      - '.github/workflows/scara_base_c_checker.yml'
 jobs:
   build:
     runs-on: ubuntu-latest
