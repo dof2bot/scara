@@ -23,6 +23,7 @@
 #include "hardware/pio.h"
 #include "pico/stdlib.h"
 #include "stepper_multi.pio.h"
+#include "stepper_pulse.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -41,6 +42,7 @@ static uint32_t pong_buffer[PING_PONG_BUFFER_SIZE];
 static volatile scara_step_coords_t current_pos = {0, 0, 0, 0};
 static volatile bool is_enabled = false;
 static volatile bool is_busy = false;
+static volatile bool next_buffer_is_ping = true;
 
 bool stepper_driver_init(void) {
   /* Initialize Enable pin */
@@ -92,7 +94,7 @@ bool stepper_driver_init(void) {
   channel_config_set_dreq(
       &cfg_ping, pio_get_dreq(stepper_pio, stepper_sm, true)
   );
-  channel_config_set_chain_to(&cfg_ping, (uint)dma_chan_pong);
+  channel_config_set_chain_to(&cfg_ping, (uint)dma_chan_ping);
 
   dma_channel_configure(
       dma_chan_ping, &cfg_ping, &stepper_pio->txf[stepper_sm], ping_buffer,
@@ -106,7 +108,7 @@ bool stepper_driver_init(void) {
   channel_config_set_dreq(
       &cfg_pong, pio_get_dreq(stepper_pio, stepper_sm, true)
   );
-  channel_config_set_chain_to(&cfg_pong, (uint)dma_chan_ping);
+  channel_config_set_chain_to(&cfg_pong, (uint)dma_chan_pong);
 
   dma_channel_configure(
       dma_chan_pong, &cfg_pong, &stepper_pio->txf[stepper_sm], pong_buffer,
@@ -158,6 +160,7 @@ void stepper_driver_emergency_stop(void) {
   gpio_put(SCARA_Z_STEP_PIN, 0);
   gpio_put(SCARA_J4_STEP_PIN, 0);
 
+  next_buffer_is_ping = true;
   is_busy = false;
 }
 
@@ -170,7 +173,19 @@ bool stepper_driver_is_busy(void) {
     return true;
   }
 
-  return is_busy;
+  if (stepper_pio && !pio_sm_is_tx_fifo_empty(stepper_pio, stepper_sm)) {
+    return true;
+  }
+
+  is_busy = false;
+  return false;
+}
+
+bool stepper_driver_is_buffer_available(void) {
+  if (next_buffer_is_ping) {
+    return (dma_chan_ping >= 0 && !dma_channel_is_busy(dma_chan_ping));
+  }
+  return (dma_chan_pong >= 0 && !dma_channel_is_busy(dma_chan_pong));
 }
 
 bool stepper_driver_submit_chunk(const uint32_t *commands, size_t count) {
@@ -178,27 +193,46 @@ bool stepper_driver_submit_chunk(const uint32_t *commands, size_t count) {
     return false;
   }
 
-  /* If ping channel is free, use ping */
-  if (!dma_channel_is_busy(dma_chan_ping)) {
+  if (next_buffer_is_ping) {
+    if (dma_chan_ping < 0 || dma_channel_is_busy(dma_chan_ping)) {
+      return false;
+    }
     memcpy(ping_buffer, commands, count * sizeof(uint32_t));
     dma_channel_set_read_addr(dma_chan_ping, ping_buffer, false);
     dma_channel_set_trans_count(dma_chan_ping, count, true);
+    next_buffer_is_ping = false;
     is_busy = true;
-
     return true;
-  }
-
-  /* If pong channel is free, use pong */
-  if (!dma_channel_is_busy(dma_chan_pong)) {
+  } else {
+    if (dma_chan_pong < 0 || dma_channel_is_busy(dma_chan_pong)) {
+      return false;
+    }
     memcpy(pong_buffer, commands, count * sizeof(uint32_t));
     dma_channel_set_read_addr(dma_chan_pong, pong_buffer, false);
     dma_channel_set_trans_count(dma_chan_pong, count, true);
+    next_buffer_is_ping = true;
     is_busy = true;
-
     return true;
   }
+}
 
-  return false;
+bool stepper_driver_stream_chunk(const uint32_t *commands, size_t count) {
+  if (!commands || count == 0 || count > PING_PONG_BUFFER_SIZE) {
+    return false;
+  }
+
+  while (!stepper_driver_is_buffer_available()) {
+    tight_loop_contents();
+  }
+
+  return stepper_driver_submit_chunk(commands, count);
+}
+
+void stepper_driver_wait_idle(void) {
+  while (stepper_driver_is_busy()) {
+    tight_loop_contents();
+  }
+  is_busy = false;
 }
 
 void stepper_driver_move_steps_sync(
@@ -208,119 +242,9 @@ void stepper_driver_move_steps_sync(
     return;
   }
 
-  int32_t d_j1 = target_steps->j1_steps - current_pos.j1_steps;
-  int32_t d_j2 = target_steps->j2_steps - current_pos.j2_steps;
-  int32_t d_z = target_steps->z_steps - current_pos.z_steps;
-  int32_t d_j4 = target_steps->j4_steps - current_pos.j4_steps;
-
-  /* Set direction pins */
-  gpio_put(SCARA_J1_DIR_PIN, d_j1 >= 0 ? 1 : 0);
-  gpio_put(SCARA_J2_DIR_PIN, d_j2 >= 0 ? 1 : 0);
-  gpio_put(SCARA_Z_DIR_PIN, d_z >= 0 ? 1 : 0);
-  gpio_put(SCARA_J4_DIR_PIN, d_j4 >= 0 ? 1 : 0);
-
-  int32_t abs_j1 = abs(d_j1);
-  int32_t abs_j2 = abs(d_j2);
-  int32_t abs_z = abs(d_z);
-  int32_t abs_j4 = abs(d_j4);
-
-  int32_t max_steps = abs_j1;
-  if (abs_j2 > max_steps) {
-    max_steps = abs_j2;
-  }
-  if (abs_z > max_steps) {
-    max_steps = abs_z;
-  }
-  if (abs_j4 > max_steps) {
-    max_steps = abs_j4;
-  }
-
-  if (max_steps == 0) {
-    return;
-  }
-
-  uint32_t half_period_us = 1000000 / (2 * step_rate_hz);
-
-  if (half_period_us < 2) {
-    half_period_us = 2;
-  }
-
-  int32_t err_j1 = 0, err_j2 = 0, err_z = 0, err_j4 = 0;
   is_busy = true;
-
-  for (int32_t i = 0; i < max_steps; i++) {
-    bool step_j1 = false, step_j2 = false, step_z = false, step_j4 = false;
-
-    err_j1 += abs_j1;
-
-    if (err_j1 >= max_steps) {
-      err_j1 -= max_steps;
-      step_j1 = true;
-      current_pos.j1_steps += (d_j1 >= 0) ? 1 : -1;
-    }
-
-    err_j2 += abs_j2;
-
-    if (err_j2 >= max_steps) {
-      err_j2 -= max_steps;
-      step_j2 = true;
-      current_pos.j2_steps += (d_j2 >= 0) ? 1 : -1;
-    }
-
-    err_z += abs_z;
-
-    if (err_z >= max_steps) {
-      err_z -= max_steps;
-      step_z = true;
-      current_pos.z_steps += (d_z >= 0) ? 1 : -1;
-    }
-
-    err_j4 += abs_j4;
-
-    if (err_j4 >= max_steps) {
-      err_j4 -= max_steps;
-      step_j4 = true;
-      current_pos.j4_steps += (d_j4 >= 0) ? 1 : -1;
-    }
-
-    /* Pulse active pins HIGH */
-    if (step_j1) {
-      gpio_put(SCARA_J1_STEP_PIN, 1);
-    }
-
-    if (step_j2) {
-      gpio_put(SCARA_J2_STEP_PIN, 1);
-    }
-
-    if (step_z) {
-      gpio_put(SCARA_Z_STEP_PIN, 1);
-    }
-
-    if (step_j4) {
-      gpio_put(SCARA_J4_STEP_PIN, 1);
-    }
-
-    sleep_us(half_period_us);
-
-    /* Reset pins LOW */
-    if (step_j1) {
-      gpio_put(SCARA_J1_STEP_PIN, 0);
-    }
-
-    if (step_j2) {
-      gpio_put(SCARA_J2_STEP_PIN, 0);
-    }
-
-    if (step_z) {
-      gpio_put(SCARA_Z_STEP_PIN, 0);
-    }
-
-    if (step_j4) {
-      gpio_put(SCARA_J4_STEP_PIN, 0);
-    }
-
-    sleep_us(half_period_us);
-  }
-
+  scara_step_coords_t pos = current_pos;
+  stepper_pulse_move_sync(target_steps, &pos, step_rate_hz);
+  current_pos = pos;
   is_busy = false;
 }

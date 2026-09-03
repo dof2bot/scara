@@ -10,6 +10,8 @@ add_library(motion INTERFACE)
 target_sources(
     motion INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/motion_planner.c
+    ${CMAKE_CURRENT_LIST_DIR}/trajectory_chunk.c
+    ${CMAKE_CURRENT_LIST_DIR}/velocity_profile.c
 )
 
 target_include_directories(
@@ -22,6 +24,7 @@ target_link_libraries(
     motion INTERFACE
     kinematics
     stepper
+    config
     pico_stdlib
     hardware_clocks
     m

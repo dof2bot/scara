@@ -18,7 +18,9 @@ include_directories(kinematics)
 include_directories(stepper)
 include_directories(motion)
 include_directories(command)
+include_directories(command/handlers)
 include_directories(io)
+include_directories(homing)
 
 # Adds sub-structure sources
 add_subdirectory(config)
@@ -27,6 +29,7 @@ add_subdirectory(stepper)
 add_subdirectory(motion)
 add_subdirectory(command)
 add_subdirectory(io)
+add_subdirectory(homing)
 
 # Sets executable
 add_executable("${CMAKE_PROJECT_NAME}" main.c)
@@ -46,6 +49,7 @@ target_link_libraries(
     motion
     command
     io
+    homing
     pico_stdlib
     pico_multicore
     pico_sync

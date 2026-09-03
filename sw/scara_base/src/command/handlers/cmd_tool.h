@@ -1,6 +1,6 @@
 /* -*- Mode: C; indent-tabs-mode: nil; c-basic-offset: 2; tab-width: 2 -*- */
 /*
- * io_gpio.h
+ * cmd_tool.h
  * Copyright (C) 2026 Vladimir Roncevic <elektron.ronca@gmail.com>
  *
  * scara-base is free software: you can redistribute it and/or modify it
@@ -18,49 +18,19 @@
  */
 #pragma once
 
-#include "scara_config.h"
+#include "parser.h"
 #include <stdbool.h>
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /**
- * @brief Initializes board status LED and auxiliary GPIOs.
- * @return true on success, false on error.
+ * @brief Handles end-effector tool commands (PUMP, VALVE).
+ * @param cmd Pointer to command received from parser.
+ * @return true if command was handled, false otherwise.
  */
-bool io_gpio_init(void);
-
-/**
- * @brief Sets on-board status LED state.
- * @param state true for LED on, false for LED off.
- */
-void io_gpio_set_led(bool state);
-
-/**
- * @brief Toggles on-board status LED state.
- */
-void io_gpio_toggle_led(void);
-
-/**
- * @brief Reads limit switch status.
- * @param endstop_pin Pin number of endstop.
- * @return true if triggered, false if open.
- */
-bool io_gpio_read_endstop(uint32_t endstop_pin);
-
-/**
- * @brief Controls end-effector vacuum pump state.
- * @param state true to turn on pump, false to turn off.
- */
-void io_gpio_set_pump(bool state);
-
-/**
- * @brief Controls end-effector release valve state.
- * @param state true to open valve, false to close.
- */
-void io_gpio_set_valve(bool state);
+bool cmd_tool_handle(const scara_command_t *cmd);
 
 #ifdef __cplusplus
 }

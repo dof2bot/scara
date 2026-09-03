@@ -17,9 +17,10 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 #include "config_storage.h"
-#include "scara_config.h"
 #include "hardware/flash.h"
 #include "hardware/sync.h"
+#include "scara_config.h"
+#include <math.h>
 #include <string.h>
 
 #define FLASH_CONFIG_OFFSET (PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE)
@@ -30,21 +31,48 @@ static uint32_t calculate_checksum(const scara_runtime_config_t *cfg) {
   const uint8_t *p = (const uint8_t *)cfg;
   size_t len = sizeof(scara_runtime_config_t) - sizeof(uint32_t);
   uint32_t sum = 0;
+
   for (size_t i = 0; i < len; ++i) {
     sum = (sum * 31) + p[i];
   }
+
   return sum;
 }
 
 static void load_hardcoded_defaults(scara_runtime_config_t *cfg) {
   cfg->magic = SCARA_CONFIG_MAGIC;
   cfg->version = SCARA_CONFIG_VERSION;
+
+  /* 1. Physical Geometry */
   cfg->l1 = SCARA_ARM_L1_MM;
   cfg->l2 = SCARA_ARM_L2_MM;
   cfg->z_min = SCARA_Z_MIN_MM;
   cfg->z_max = SCARA_Z_MAX_MM;
-  cfg->min_speed = 1.0f;
+
+  /* 2. Speeds & Acceleration Dynamics */
+  cfg->min_speed = SCARA_MIN_SPEED_MM_S;
   cfg->max_speed = SCARA_MAX_SPEED_MM_S;
+  cfg->default_speed = SCARA_DEFAULT_SPEED_MM_S;
+  cfg->default_accel = SCARA_DEFAULT_ACCEL_MM_S2;
+  cfg->max_accel = SCARA_MAX_ACCEL_MM_S2;
+
+  /* 3. Homing Calibration & Offsets */
+  cfg->home_offset_j1 = SCARA_HOME_OFFSET_J1_RAD;
+  cfg->home_offset_j2 = SCARA_HOME_OFFSET_J2_RAD;
+  cfg->homing_rate_hz = SCARA_HOMING_STEP_RATE_HZ;
+
+  /* 4. Software Joint Angular Limits */
+  cfg->j1_min_rad = SCARA_J1_MIN_RAD;
+  cfg->j1_max_rad = SCARA_J1_MAX_RAD;
+  cfg->j2_min_rad = SCARA_J2_MIN_RAD;
+  cfg->j2_max_rad = SCARA_J2_MAX_RAD;
+
+  /* 5. Stepper Transmission & Lead Parameters */
+  cfg->gear_ratio_j1 = SCARA_GEAR_RATIO_J1;
+  cfg->gear_ratio_j2 = SCARA_GEAR_RATIO_J2;
+  cfg->gear_ratio_j4 = SCARA_GEAR_RATIO_J4;
+  cfg->leadscrew_pitch_z = SCARA_LEADSCREW_PITCH_Z;
+
   cfg->checksum = calculate_checksum(cfg);
 }
 
@@ -55,6 +83,7 @@ void config_storage_init(void) {
   if (flash_cfg->magic == SCARA_CONFIG_MAGIC &&
       flash_cfg->version == SCARA_CONFIG_VERSION) {
     uint32_t expected = calculate_checksum(flash_cfg);
+
     if (flash_cfg->checksum == expected) {
       memcpy(&active_config, flash_cfg, sizeof(scara_runtime_config_t));
       return;
@@ -72,6 +101,7 @@ void config_storage_set(const scara_runtime_config_t *new_cfg) {
   if (!new_cfg) {
     return;
   }
+
   active_config = *new_cfg;
   active_config.magic = SCARA_CONFIG_MAGIC;
   active_config.version = SCARA_CONFIG_VERSION;
@@ -96,4 +126,32 @@ bool config_storage_save_flash(void) {
 void config_storage_reset_defaults(void) {
   load_hardcoded_defaults(&active_config);
   config_storage_save_flash();
+}
+
+float config_storage_get_steps_per_rad_j1(void) {
+  float gr = (active_config.gear_ratio_j1 > 0.01f) ? active_config.gear_ratio_j1
+                                                   : SCARA_GEAR_RATIO_J1;
+  return (SCARA_STEPS_PER_REV * SCARA_MICROSTEPPING * gr) /
+         (2.0f * (float)M_PI);
+}
+
+float config_storage_get_steps_per_rad_j2(void) {
+  float gr = (active_config.gear_ratio_j2 > 0.01f) ? active_config.gear_ratio_j2
+                                                   : SCARA_GEAR_RATIO_J2;
+  return (SCARA_STEPS_PER_REV * SCARA_MICROSTEPPING * gr) /
+         (2.0f * (float)M_PI);
+}
+
+float config_storage_get_steps_per_rad_j4(void) {
+  float gr = (active_config.gear_ratio_j4 > 0.01f) ? active_config.gear_ratio_j4
+                                                   : SCARA_GEAR_RATIO_J4;
+  return (SCARA_STEPS_PER_REV * SCARA_MICROSTEPPING * gr) /
+         (2.0f * (float)M_PI);
+}
+
+float config_storage_get_steps_per_mm_z(void) {
+  float pitch = (active_config.leadscrew_pitch_z > 0.01f)
+                    ? active_config.leadscrew_pitch_z
+                    : SCARA_LEADSCREW_PITCH_Z;
+  return (SCARA_STEPS_PER_REV * SCARA_MICROSTEPPING) / pitch;
 }

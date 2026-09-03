@@ -17,7 +17,11 @@
  * with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 #include "motion_planner.h"
+#include "config/config_storage.h"
 #include "hardware/clocks.h"
+#include "kinematics/safety_guard.h"
+#include "trajectory_chunk.h"
+#include "velocity_profile.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +36,9 @@ static scara_pose_t current_cartesian_pose = {
 
 static scara_elbow_config_t active_elbow_config = SCARA_ELBOW_RIGHT;
 
+static const char RESP_TELEM_FMT[] =
+    "<TELEM#X=%.2f#Y=%.2f#Z=%.2f#PHI=%.2f#J1=%ld#J2=%ld#Z_STEP=%ld#J4=%ld>\n";
+
 void motion_planner_init(float l1, float l2) {
   if (l1 > 0.0f) {
     arm_geometry.l1 = l1;
@@ -41,23 +48,35 @@ void motion_planner_init(float l1, float l2) {
   }
 }
 
-scara_step_coords_t
-motion_planner_joints_to_steps(const scara_joints_t *joints) {
+void motion_planner_set_elbow_config(scara_elbow_config_t config) {
+  active_elbow_config = config;
+}
+
+scara_elbow_config_t motion_planner_get_elbow_config(void) {
+  return active_elbow_config;
+}
+
+scara_step_coords_t motion_planner_joints_to_steps(const scara_joints_t *joints
+) {
   scara_step_coords_t steps = {0};
   if (!joints) {
     return steps;
   }
 
-  steps.j1_steps = (int32_t)lroundf(joints->theta1 * SCARA_STEPS_PER_RAD_J1);
-  steps.j2_steps = (int32_t)lroundf(joints->theta2 * SCARA_STEPS_PER_RAD_J2);
-  steps.z_steps = (int32_t)lroundf(joints->z * SCARA_STEPS_PER_MM_Z);
-  steps.j4_steps = (int32_t)lroundf(joints->theta4 * SCARA_STEPS_PER_RAD_J4);
+  steps.j1_steps =
+      (int32_t)lroundf(joints->theta1 * config_storage_get_steps_per_rad_j1());
+  steps.j2_steps =
+      (int32_t)lroundf(joints->theta2 * config_storage_get_steps_per_rad_j2());
+  steps.z_steps =
+      (int32_t)lroundf(joints->z * config_storage_get_steps_per_mm_z());
+  steps.j4_steps =
+      (int32_t)lroundf(joints->theta4 * config_storage_get_steps_per_rad_j4());
 
   return steps;
 }
 
-scara_joints_t
-motion_planner_steps_to_joints(const scara_step_coords_t *steps) {
+scara_joints_t motion_planner_steps_to_joints(const scara_step_coords_t *steps
+) {
   scara_joints_t joints = {0};
 
   if (!steps) {
@@ -98,11 +117,13 @@ bool motion_planner_move_linear(const scara_waypoint_t *target) {
       .x = target->x, .y = target->y, .z = target->z, .phi = target->phi
   };
 
-  /* Verify target reachability first */
-  scara_joints_t final_joints =
-      scara_ik_solve(&arm_geometry, &target_pose, active_elbow_config);
+  /* Verify safety constraints (limits, singularities) */
+  scara_joints_t final_joints;
+  safety_status_t safety_stat = safety_guard_check_pose(
+      &arm_geometry, &target_pose, active_elbow_config, &final_joints
+  );
 
-  if (!final_joints.reachable) {
+  if (safety_stat != SAFETY_STATUS_OK) {
     return false;
   }
 
@@ -117,11 +138,24 @@ bool motion_planner_move_linear(const scara_waypoint_t *target) {
     return true; /* Already at target */
   }
 
-  float speed =
-      (target->speed > 0.1f) ? target->speed : SCARA_DEFAULT_SPEED_MM_S;
+  const scara_runtime_config_t *cfg = config_storage_get();
+  float def_spd = (cfg->default_speed > 0.1f) ? cfg->default_speed
+                                              : SCARA_DEFAULT_SPEED_MM_S;
+  float speed = (target->speed > 0.1f) ? target->speed : def_spd;
 
-  if (speed > SCARA_MAX_SPEED_MM_S) {
-    speed = SCARA_MAX_SPEED_MM_S;
+  /* Scale Cartesian speed smoothly near singularities */
+  float speed_scale = safety_guard_get_speed_scaling(final_joints.theta2);
+  speed *= speed_scale;
+
+  float max_spd =
+      (cfg->max_speed > 0.1f) ? cfg->max_speed : SCARA_MAX_SPEED_MM_S;
+  float min_spd =
+      (cfg->min_speed > 0.01f) ? cfg->min_speed : SCARA_MIN_SPEED_MM_S;
+
+  if (speed > max_spd) {
+    speed = max_spd;
+  } else if (speed < min_spd) {
+    speed = min_spd;
   }
 
   /* Segment line by SCARA_SEGMENT_LEN_MM */
@@ -130,71 +164,62 @@ bool motion_planner_move_linear(const scara_waypoint_t *target) {
     num_segments = 1;
   }
 
-  float dt_segment =
-      (distance > 0.001f) ? ((distance / speed) / (float)num_segments) : 0.01f;
+  uint32_t remaining = num_segments;
+  uint32_t seg_offset = 0;
 
-  for (uint32_t i = 1; i <= num_segments; i++) {
-    float t = (float)i / (float)num_segments;
-    scara_pose_t intermediate_pose = {
-        .x = current_cartesian_pose.x + dx * t,
-        .y = current_cartesian_pose.y + dy * t,
-        .z = current_cartesian_pose.z + dz * t,
-        .phi = current_cartesian_pose.phi + dphi * t
+  while (remaining > 0) {
+    uint32_t batch_size = remaining;
+    if (batch_size > SCARA_STREAM_BATCH_SEGMENTS) {
+      batch_size = SCARA_STREAM_BATCH_SEGMENTS;
+    }
+
+    float t_start = (float)seg_offset / (float)num_segments;
+    float t_end = (float)(seg_offset + batch_size) / (float)num_segments;
+
+    scara_pose_t p_start = {
+        .x = current_cartesian_pose.x + dx * t_start,
+        .y = current_cartesian_pose.y + dy * t_start,
+        .z = current_cartesian_pose.z + dz * t_start,
+        .phi = current_cartesian_pose.phi + dphi * t_start
+    };
+    scara_pose_t p_end = {
+        .x = current_cartesian_pose.x + dx * t_end,
+        .y = current_cartesian_pose.y + dy * t_end,
+        .z = current_cartesian_pose.z + dz * t_end,
+        .phi = current_cartesian_pose.phi + dphi * t_end
     };
 
-    scara_joints_t seg_joints =
-        scara_ik_solve(&arm_geometry, &intermediate_pose, active_elbow_config);
+    static uint32_t chunk_words[SCARA_MAX_SEGMENTS_CHUNK];
+    size_t words_generated = 0;
 
-    if (!seg_joints.reachable) {
+    bool ok = trajectory_chunk_generate(
+        &arm_geometry, active_elbow_config, &p_start, &p_end, speed,
+        chunk_words, batch_size, &words_generated
+    );
+
+    if (!ok) {
       return false;
     }
 
-    scara_step_coords_t seg_steps = motion_planner_joints_to_steps(&seg_joints);
-    scara_step_coords_t cur_pos = stepper_driver_get_position();
-
-    int32_t d1 = labs((long)seg_steps.j1_steps - (long)cur_pos.j1_steps);
-    int32_t d2 = labs((long)seg_steps.j2_steps - (long)cur_pos.j2_steps);
-    int32_t dz_s = labs((long)seg_steps.z_steps - (long)cur_pos.z_steps);
-    int32_t d4 = labs((long)seg_steps.j4_steps - (long)cur_pos.j4_steps);
-
-    int32_t max_steps = d1;
-    if (d2 > max_steps) {
-      max_steps = d2;
-    }
-    if (dz_s > max_steps) {
-      max_steps = dz_s;
-    }
-    if (d4 > max_steps) {
-      max_steps = d4;
-    }
-
-    uint32_t step_rate_hz = 1000;
-    if (dt_segment > 0.0001f && max_steps > 0) {
-      step_rate_hz = (uint32_t)ceilf((float)max_steps / dt_segment);
-    }
-
-    if (step_rate_hz < 100) {
-      step_rate_hz = 100;
-    }
-    if (step_rate_hz > 50000) {
-      step_rate_hz = 50000;
-    }
-
-    stepper_driver_move_steps_sync(&seg_steps, step_rate_hz);
-
-    /* Stream real-time telemetry back to host (HIL Digital Twin feedback) */
-    if (i % 2 == 0 || i == num_segments) {
+    if (words_generated > 0) {
+      stepper_driver_stream_chunk(chunk_words, words_generated);
+      scara_joints_t cur_j =
+          scara_ik_solve(&arm_geometry, &p_end, active_elbow_config);
+      scara_step_coords_t cur_s = motion_planner_joints_to_steps(&cur_j);
       printf(
-          "<TELEM#X=%.2f#Y=%.2f#Z=%.2f#PHI=%.2f#J1=%ld#J2=%ld#Z_STEP=%ld#J4=%"
-          "ld>\n",
-          intermediate_pose.x, intermediate_pose.y, intermediate_pose.z,
-          intermediate_pose.phi, (long)seg_steps.j1_steps,
-          (long)seg_steps.j2_steps, (long)seg_steps.z_steps,
-          (long)seg_steps.j4_steps
+          RESP_TELEM_FMT,
+          p_end.x, p_end.y, p_end.z, p_end.phi, (long)cur_s.j1_steps,
+          (long)cur_s.j2_steps, (long)cur_s.z_steps, (long)cur_s.j4_steps
       );
     }
+
+    seg_offset += batch_size;
+    remaining -= batch_size;
   }
 
+  scara_step_coords_t final_steps =
+      motion_planner_joints_to_steps(&final_joints);
+  stepper_driver_set_position(&final_steps);
   current_cartesian_pose = target_pose;
   return true;
 }
@@ -203,110 +228,8 @@ bool motion_planner_generate_chunk(
     const scara_pose_t *p1, const scara_pose_t *p2, float speed,
     uint32_t *out_buffer, size_t max_words, size_t *out_count
 ) {
-  if (!p1 || !p2 || !out_buffer || max_words == 0 || !out_count) {
-    return false;
-  }
-
-  float dx = p2->x - p1->x;
-  float dy = p2->y - p1->y;
-  float dz = p2->z - p1->z;
-  float dphi = p2->phi - p1->phi;
-
-  float distance = sqrtf(dx * dx + dy * dy + dz * dz);
-
-  if (distance < 0.001f) {
-    *out_count = 0;
-    return true;
-  }
-
-  if (speed <= 0.1f) {
-    speed = SCARA_DEFAULT_SPEED_MM_S;
-  }
-
-  if (speed > SCARA_MAX_SPEED_MM_S) {
-    speed = SCARA_MAX_SPEED_MM_S;
-  }
-
-  uint32_t num_segments = (uint32_t)ceilf(distance / SCARA_SEGMENT_LEN_MM);
-
-  if (num_segments > max_words) {
-    num_segments = max_words;
-  }
-
-  float dt = (distance / speed) / (float)num_segments;
-  uint32_t delay_cycles = (uint32_t)(clock_get_hz(clk_sys) * dt);
-
-  if (delay_cycles < 200) {
-    delay_cycles = 200;
-  }
-
-  if (delay_cycles > 0x00FFFFFF) {
-    delay_cycles = 0x00FFFFFF;
-  }
-
-  scara_joints_t j_init =
-      scara_ik_solve(&arm_geometry, p1, active_elbow_config);
-
-  if (!j_init.reachable) {
-    return false;
-  }
-
-  scara_step_coords_t last_s = motion_planner_joints_to_steps(&j_init);
-
-  for (uint32_t i = 1; i <= num_segments; i++) {
-    float t = (float)i / (float)num_segments;
-    scara_pose_t p_cur = {
-        .x = p1->x + dx * t,
-        .y = p1->y + dy * t,
-        .z = p1->z + dz * t,
-        .phi = p1->phi + dphi * t
-    };
-
-    scara_joints_t j_cur =
-        scara_ik_solve(&arm_geometry, &p_cur, active_elbow_config);
-
-    if (!j_cur.reachable) {
-      return false;
-    }
-
-    scara_step_coords_t cur_s = motion_planner_joints_to_steps(&j_cur);
-
-    uint8_t dir_mask = 0;
-    uint8_t step_mask = 0;
-
-    if (cur_s.j1_steps != last_s.j1_steps) {
-      step_mask |= (1 << 0);
-      if (cur_s.j1_steps > last_s.j1_steps) {
-        dir_mask |= (1 << 0);
-      }
-    }
-    if (cur_s.j2_steps != last_s.j2_steps) {
-      step_mask |= (1 << 1);
-      if (cur_s.j2_steps > last_s.j2_steps) {
-        dir_mask |= (1 << 1);
-      }
-    }
-    if (cur_s.z_steps != last_s.z_steps) {
-      step_mask |= (1 << 2);
-      if (cur_s.z_steps > last_s.z_steps) {
-        dir_mask |= (1 << 2);
-      }
-    }
-    if (cur_s.j4_steps != last_s.j4_steps) {
-      step_mask |= (1 << 3);
-      if (cur_s.j4_steps > last_s.j4_steps) {
-        dir_mask |= (1 << 3);
-      }
-    }
-
-    last_s = cur_s;
-
-    /* Format 32-bit PIO word: [DIR(4)] [STEP(4)] [DELAY(24)] */
-    out_buffer[i - 1] = ((uint32_t)dir_mask << 28) |
-                        ((uint32_t)step_mask << 24) |
-                        (delay_cycles & 0x00FFFFFF);
-  }
-
-  *out_count = num_segments;
-  return true;
+  return trajectory_chunk_generate(
+      &arm_geometry, active_elbow_config, p1, p2, speed, out_buffer, max_words,
+      out_count
+  );
 }

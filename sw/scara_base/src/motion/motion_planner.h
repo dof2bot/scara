@@ -21,6 +21,7 @@
 #include "kinematics/scara_ik.h"
 #include "scara_config.h"
 #include "stepper/stepper_driver.h"
+#include "trajectory_chunk.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -49,13 +50,27 @@ typedef struct {
 void motion_planner_init(float l1, float l2);
 
 /**
+ * @brief Sets active elbow kinematic configuration (Righty / Lefty).
+ *
+ * @param config SCARA_ELBOW_RIGHT or SCARA_ELBOW_LEFT.
+ */
+void motion_planner_set_elbow_config(scara_elbow_config_t config);
+
+/**
+ * @brief Gets currently active elbow kinematic configuration.
+ *
+ * @return scara_elbow_config_t Active elbow configuration.
+ */
+scara_elbow_config_t motion_planner_get_elbow_config(void);
+
+/**
  * @brief Converts joint angles/positions into discrete motor steps.
  *
  * @param joints Pointer to calculated joint values.
  * @return scara_step_coords_t Motor step coordinates.
  */
-scara_step_coords_t
-motion_planner_joints_to_steps(const scara_joints_t *joints);
+scara_step_coords_t motion_planner_joints_to_steps(const scara_joints_t *joints
+);
 
 /**
  * @brief Converts motor steps back into joint angles/positions.

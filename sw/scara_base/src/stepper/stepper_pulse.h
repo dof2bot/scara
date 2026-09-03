@@ -1,6 +1,6 @@
 /* -*- Mode: C; indent-tabs-mode: nil; c-basic-offset: 2; tab-width: 2 -*- */
 /*
- * io_gpio.h
+ * stepper_pulse.h
  * Copyright (C) 2026 Vladimir Roncevic <elektron.ronca@gmail.com>
  *
  * scara-base is free software: you can redistribute it and/or modify it
@@ -18,8 +18,7 @@
  */
 #pragma once
 
-#include "scara_config.h"
-#include <stdbool.h>
+#include "stepper_driver.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -27,40 +26,16 @@ extern "C" {
 #endif
 
 /**
- * @brief Initializes board status LED and auxiliary GPIOs.
- * @return true on success, false on error.
+ * @brief Executes a synchronized multi-axis Bresenham stepping move.
+ *
+ * @param target_steps Target step coordinates for all 4 axes.
+ * @param current_pos Pointer to current position coordinates to be updated.
+ * @param step_rate_hz Base step pulse frequency (Hz).
  */
-bool io_gpio_init(void);
-
-/**
- * @brief Sets on-board status LED state.
- * @param state true for LED on, false for LED off.
- */
-void io_gpio_set_led(bool state);
-
-/**
- * @brief Toggles on-board status LED state.
- */
-void io_gpio_toggle_led(void);
-
-/**
- * @brief Reads limit switch status.
- * @param endstop_pin Pin number of endstop.
- * @return true if triggered, false if open.
- */
-bool io_gpio_read_endstop(uint32_t endstop_pin);
-
-/**
- * @brief Controls end-effector vacuum pump state.
- * @param state true to turn on pump, false to turn off.
- */
-void io_gpio_set_pump(bool state);
-
-/**
- * @brief Controls end-effector release valve state.
- * @param state true to open valve, false to close.
- */
-void io_gpio_set_valve(bool state);
+void stepper_pulse_move_sync(
+    const scara_step_coords_t *target_steps, scara_step_coords_t *current_pos,
+    uint32_t step_rate_hz
+);
 
 #ifdef __cplusplus
 }

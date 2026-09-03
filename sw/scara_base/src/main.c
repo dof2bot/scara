@@ -25,6 +25,7 @@
 #include "command/trajectory_queue.h"
 #include "config/config_storage.h"
 #include "config/scara_config.h"
+#include "homing/homing_controller.h"
 #include "io/io_gpio.h"
 #include "kinematics/scara_ik.h"
 #include "motion/motion_planner.h"
@@ -37,6 +38,18 @@
 static const uint32_t USB_CONN_CHECK_MS = 100;
 static const uint32_t HEARTBEAT_INTERVAL_MS = 500;
 
+/* Motion worker serial response literals */
+static const char RESP_HOMING_IN_PROGRESS[] = "<RESP:HOMING_IN_PROGRESS>\n";
+static const char RESP_HOMED_SUCCESS_FMT[] =
+    "<RESP:HOMED_SUCCESS#X=%.2f#Y=%.2f#Z=%.2f#PHI=%.2f>\n";
+static const char RESP_HOMING_FAILED[] = "<RESP:HOMING_FAILED>\n";
+
+static const char RESP_MOVE_START_FMT[] =
+    "<RESP:MOVE_START#X=%.2f#Y=%.2f#Z=%.2f#PHI=%.2f>\n";
+static const char RESP_MOVE_DONE_FMT[] =
+    "<RESP:MOVE_DONE#X=%.2f#Y=%.2f#Z=%.2f#PHI=%.2f>\n";
+static const char RESP_MOVE_FAILED[] = "<RESP:MOVE_FAILED>\n";
+
 /* Shared Ring Buffer for waypoints between Core 0 and Core 1 */
 static trajectory_queue_t global_trajectory_queue;
 
@@ -48,8 +61,24 @@ static void core1_motion_worker(void) {
   scara_waypoint_t target_wp;
 
   while (true) {
-    /* If there is a point in trajectory queue and system is not in E-STOP */
-    if (dispatcher_get_state() != SYSTEM_STATE_ESTOP) {
+    /* 1. Handle Homing sequence if requested */
+    if (homing_controller_is_requested()) {
+      printf("%s", RESP_HOMING_IN_PROGRESS);
+      bool home_ok = homing_controller_run();
+      if (home_ok) {
+        scara_pose_t home_p = motion_planner_get_current_pose();
+        printf(
+            RESP_HOMED_SUCCESS_FMT, home_p.x, home_p.y, home_p.z, home_p.phi
+        );
+      } else {
+        printf("%s", RESP_HOMING_FAILED);
+      }
+    }
+
+    /* 2. Process waypoints if system state allows motion */
+    scara_system_state_t cur_state = dispatcher_get_state();
+    if (cur_state != SYSTEM_STATE_ESTOP && cur_state != SYSTEM_STATE_HOLD &&
+        cur_state != SYSTEM_STATE_HOMING) {
       if (trajectory_queue_pop(&global_trajectory_queue, &target_wp)) {
         /* Enable steppers automatically on motion if not already enabled */
         if (!stepper_driver_is_enabled()) {
@@ -57,21 +86,22 @@ static void core1_motion_worker(void) {
         }
 
         printf(
-            "<RESP:MOVE_START#X=%.2f#Y=%.2f#Z=%.2f#PHI=%.2f>\n", target_wp.x,
-            target_wp.y, target_wp.z, target_wp.phi
+            RESP_MOVE_START_FMT, target_wp.x, target_wp.y, target_wp.z,
+            target_wp.phi
         );
 
         /* Execute linear Cartesian motion with analytical IK */
         bool ok = motion_planner_move_linear(&target_wp);
 
         if (ok) {
+          stepper_driver_wait_idle();
           scara_pose_t final_p = motion_planner_get_current_pose();
           printf(
-              "<RESP:MOVE_DONE#X=%.2f#Y=%.2f#Z=%.2f#PHI=%.2f>\n", final_p.x,
-              final_p.y, final_p.z, final_p.phi
+              RESP_MOVE_DONE_FMT, final_p.x, final_p.y, final_p.z,
+              final_p.phi
           );
         } else {
-          printf("<RESP:MOVE_FAILED>\n");
+          printf("%s", RESP_MOVE_FAILED);
         }
       }
     }

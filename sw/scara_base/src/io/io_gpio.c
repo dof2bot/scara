@@ -40,6 +40,15 @@ bool io_gpio_init(void) {
     gpio_pull_up(endstop_pins[i]);
   }
 
+  /* Initialize Tool GPIOs (Pump & Valve) */
+  gpio_init(SCARA_TOOL_PUMP_PIN);
+  gpio_set_dir(SCARA_TOOL_PUMP_PIN, GPIO_OUT);
+  gpio_put(SCARA_TOOL_PUMP_PIN, 0);
+
+  gpio_init(SCARA_TOOL_VALVE_PIN);
+  gpio_set_dir(SCARA_TOOL_VALVE_PIN, GPIO_OUT);
+  gpio_put(SCARA_TOOL_VALVE_PIN, 0);
+
   return true;
 }
 
@@ -55,4 +64,12 @@ void io_gpio_toggle_led(void) {
 bool io_gpio_read_endstop(uint32_t endstop_pin) {
   /* Active LOW when switch hits GND */
   return gpio_get(endstop_pin) == 0;
+}
+
+void io_gpio_set_pump(bool state) {
+  gpio_put(SCARA_TOOL_PUMP_PIN, state ? 1 : 0);
+}
+
+void io_gpio_set_valve(bool state) {
+  gpio_put(SCARA_TOOL_VALVE_PIN, state ? 1 : 0);
 }
