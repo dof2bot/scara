@@ -12,11 +12,16 @@ target_sources(
     ${CMAKE_CURRENT_LIST_DIR}/trajectory_queue.c
     ${CMAKE_CURRENT_LIST_DIR}/parser.c
     ${CMAKE_CURRENT_LIST_DIR}/dispatcher.c
+    ${CMAKE_CURRENT_LIST_DIR}/handlers/cmd_motion.c
+    ${CMAKE_CURRENT_LIST_DIR}/handlers/cmd_system.c
+    ${CMAKE_CURRENT_LIST_DIR}/handlers/cmd_config.c
+    ${CMAKE_CURRENT_LIST_DIR}/handlers/cmd_tool.c
 )
 
 target_include_directories(
     command INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/handlers
     ${CMAKE_CURRENT_LIST_DIR}/..
     ${CMAKE_CURRENT_LIST_DIR}/../config
 )
@@ -26,6 +31,9 @@ target_link_libraries(
     motion
     kinematics
     stepper
+    config
+    io
+    homing
     pico_stdlib
     pico_sync
 )

@@ -13,6 +13,7 @@ pico_generate_pio_header(stepper ${CMAKE_CURRENT_LIST_DIR}/stepper_multi.pio)
 target_sources(
     stepper INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/stepper_driver.c
+    ${CMAKE_CURRENT_LIST_DIR}/stepper_pulse.c
 )
 
 target_include_directories(

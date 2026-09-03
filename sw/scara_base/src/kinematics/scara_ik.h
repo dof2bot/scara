@@ -18,6 +18,7 @@
  */
 #pragma once
 
+#include "config/scara_config.h"
 #include <stdbool.h>
 #include <stdint.h>
 

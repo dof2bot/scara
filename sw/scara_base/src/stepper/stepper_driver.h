@@ -89,6 +89,26 @@ bool stepper_driver_is_busy(void);
 bool stepper_driver_submit_chunk(const uint32_t *commands, size_t count);
 
 /**
+ * @brief Checks if the next ping-pong DMA buffer is free to receive new data.
+ * @return true if ready, false if busy.
+ */
+bool stepper_driver_is_buffer_available(void);
+
+/**
+ * @brief Blocks until the next ping-pong buffer is ready and queues the chunk.
+ *
+ * @param commands Pointer to array of formatted PIO command words.
+ * @param count Number of command words.
+ * @return true if successfully queued, false on error.
+ */
+bool stepper_driver_stream_chunk(const uint32_t *commands, size_t count);
+
+/**
+ * @brief Blocks until all queued DMA chunks and PIO pulses complete.
+ */
+void stepper_driver_wait_idle(void);
+
+/**
  * @brief Executes a single synchronized multi-axis move (blocking / polling
  * mode).
  *

@@ -34,6 +34,7 @@ typedef enum {
   SYSTEM_STATE_INIT = 0,
   SYSTEM_STATE_IDLE,
   SYSTEM_STATE_RUNNING,
+  SYSTEM_STATE_HOLD,
   SYSTEM_STATE_ESTOP,
   SYSTEM_STATE_HOMING
 } scara_system_state_t;
@@ -60,6 +61,25 @@ void dispatcher_tick(void);
  * @return scara_system_state_t Current state.
  */
 scara_system_state_t dispatcher_get_state(void);
+
+/**
+ * @brief Sets current system operational state.
+ * @param state New state.
+ */
+void dispatcher_set_state(scara_system_state_t state);
+
+/**
+ * @brief Returns shared trajectory queue pointer.
+ * @return trajectory_queue_t* Queue pointer or NULL.
+ */
+trajectory_queue_t *dispatcher_get_queue(void);
+
+/**
+ * @brief Returns string representation of operational state.
+ * @param state Operational state.
+ * @return const char* State string.
+ */
+const char *dispatcher_get_state_str(scara_system_state_t state);
 
 #ifdef __cplusplus
 }

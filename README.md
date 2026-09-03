@@ -39,33 +39,70 @@ cmake ..
 make -j$(nproc)
 ```
 
-**Flashing the firmware:**
+Alternatively, use the provided helper scripts:
+
+```bash
+# Setup udev rules for non-root picotool and USB serial access (optional)
+./scripts/setup_udev.sh
+
+# Build firmware
+./scripts/flash.sh build
+
+# Build and flash automatically to connected Pico via picotool or mass-storage
+./scripts/flash.sh build-and-flash
+```
+
+**Flashing the firmware manually:**
 1. Hold down the **BOOTSEL** button while connecting the Pico / BTT SKR Pico to your computer via USB.
 2. Mount the board as mass storage (`RPI-RP2`).
-3. Copy or drag-and-drop `scara-base.uf2` into the drive. The device will automatically reboot and run the firmware.
+3. Copy or drag-and-drop `build/src/scara-base.uf2` into the drive. The device will automatically reboot and run the firmware.
 
 ### Usage
 
 The firmware exposes a serial interface over USB CDC (`115200` baud) for real-time control, configuration, and trajectory execution.
 
-**Common Commands:**
+The firmware runs a **dual-core architecture**:
+* **Core 0**: Handles non-blocking USB CDC serial communication, ASCII protocol parsing, command dispatching, safety monitoring, and heartbeat LED.
+* **Core 1**: Dedicated real-time motion worker handling the waypoint trajectory queue, analytical Inverse Kinematics (IK), trapezoidal velocity profiling, and multi-axis stepper pulse generation.
+
+#### Serial Command Reference
 
 ```text
-# System state & control
-<CMD:STATUS>                             # Query current state and endstop sensor status
-<CMD:ENABLE>                             # Enable stepper motor drivers
-<CMD:DISABLE>                            # Disable stepper motor drivers
-<CMD:HOME>                               # Trigger homing sequence
-<CMD:ESTOP>                              # Immediate emergency stop
+# System State & Control
+<CMD:STATUS>                             # Query current state (IDLE, MOVING, HOMING, HOLD, ESTOP) and endstops
+<CMD:ENABLE>                             # Energize and enable stepper motor drivers
+<CMD:DISABLE>                            # De-energize and disable stepper motor drivers
+<CMD:HOME>                               # Trigger multi-axis coordinated homing sequence
+<CMD:ESTOP>                              # Immediate emergency stop and motion abort
+<CMD:HOLD>                               # Feed hold / pause trajectory execution (alias: <CMD:PAUSE>)
+<CMD:RESUME>                             # Resume paused trajectory execution
 
-# Motion & Waypoints (linear interpolation with analytical IK)
-<pt#X#Y#Z#PHI#SPEED#end>                 # Waypoint: X, Y, Z (mm), PHI (tool angle deg), SPEED (mm/s)
-<CMD:GETPOS>                             # Read current Cartesian coordinates and tool pose
+# Motion & Positioning
+<pt#X#Y#Z#PHI#SPEED#end>                 # Push Cartesian waypoint: X, Y, Z (mm), PHI (tool angle deg), SPEED (mm/s)
+<CMD:GETPOS>                             # Read current Cartesian coordinates and tool orientation
+<CMD:SETPOS#X#Y#Z#PHI#end>               # Set/override current Cartesian coordinate frame origin
+<CMD:JOG#axis#step>                      # Manual relative jog (axis: 'X', 'Y', 'Z', or 'P' for PHI; step: mm or deg)
 
-# Configuration & Flash persistence
-<CMD:GET_CONFIG>                         # Read runtime configuration (L1, L2, limits, speeds)
-<CMD:SAVE_CONFIG>                        # Save current configuration into on-board Flash
-<CMD:RESET_CONFIG>                       # Restore factory default configuration
+# Kinematics & Arm Configuration
+<CMD:SET_ELBOW#LEFT>                     # Select Left-arm (elbow left) inverse kinematics configuration
+<CMD:SET_ELBOW#RIGHT>                    # Select Right-arm (elbow right) inverse kinematics configuration
+<CMD:GET_ELBOW>                          # Read current elbow configuration
+
+# End-Effector Tool Control
+<CMD:PUMP#1>                             # Turn ON vacuum/pump actuator
+<CMD:PUMP#0>                             # Turn OFF vacuum/pump actuator
+<CMD:VALVE#1>                            # Open air release valve
+<CMD:VALVE#0>                            # Close air release valve
+
+# Runtime Configuration & Flash Persistence
+<CMD:GET_CONFIG>                         # Read runtime configuration (link lengths, limits, dynamics, speeds)
+<CMD:SET_CONFIG#L1=..#L2=..#Z_MIN=..#Z_MAX=..#MIN_SPEED=..#MAX_SPEED=..> # Configure geometry and speed bounds
+<CMD:SET_DYNAMICS#ACCEL=..#MAX_ACCEL=..#DEF_SPD=..>                      # Configure motion dynamics
+<CMD:SET_HOMING#OFF_J1=..#OFF_J2=..#RATE=..>                             # Configure homing offsets and rate
+<CMD:SET_LIMITS#J1_MIN=..#J1_MAX=..#J2_MIN=..#J2_MAX=..>                 # Configure joint angle limits (rad)
+<CMD:SET_STEPS#GR_J1=..#GR_J2=..#GR_J4=..#LEAD_Z=..>                     # Configure gear ratios and Z lead
+<CMD:SAVE_CONFIG>                        # Save active configuration into on-board Flash (with CRC32 check)
+<CMD:RESET_CONFIG>                       # Restore factory default configuration parameters
 ```
 
 ### Dependencies
@@ -75,26 +112,30 @@ The firmware exposes a serial interface over USB CDC (`115200` baud) for real-ti
 * **Pico SDK**: [Raspberry Pi Pico SDK](https://github.com/raspberrypi/pico-sdk) (>= 1.5.0)
 * **Compiler**: `arm-none-eabi-gcc` and `arm-none-eabi-newlib`
 * **Build Tools**: `CMake` (>= 3.12) and `Make` or `Ninja`
+* **Flashing Tools**: `picotool` (optional, for automated flashing and reboot)
 * **Target Hardware**: Raspberry Pi Pico (RP2040) or BTT SKR Pico V1.0 board
 
 ### Project structure
 
-**scara** codebase is organized into hardware and dual-core software modules:
+**scara** codebase is organized into hardware designs, documentation, and dual-core firmware modules:
 
 ```text
 scara/
 ├── docs/                 # Documentation, specifications, and assets (logo)
 ├── hw/                   # Hardware design, CAD files, and schematics
 └── sw/
-    └── scara_base/       # RP2040 dual-core C11/C++17 firmware
+    └── scara_base/       # RP2040 dual-core C11 firmware
+        ├── scripts/      # Automation utilities (flash.sh, setup_udev.sh)
         ├── src/
-        │   ├── command/     # Packet parser, command dispatcher & ring buffer queue
-        │   ├── config/      # Runtime configuration and persistent Flash storage
-        │   ├── io/          # GPIO mapping, limit switches/endstops and LED status
-        │   ├── kinematics/  # Analytical Forward & Inverse Kinematics (L1, L2)
-        │   ├── motion/      # Cartesian trajectory planner and interpolation
-        │   ├── stepper/     # Multi-axis stepper driver utilizing RP2040 PIO
-        │   └── main.c       # Dual-core firmware entry point
+        │   ├── command/     # Serial packet parser, dispatcher, and trajectory queue
+        │   │   └── handlers/# Modular handlers (cmd_system, cmd_motion, cmd_config, cmd_tool)
+        │   ├── config/      # Runtime configuration, defaults, and Flash persistent storage
+        │   ├── homing/      # Multi-axis coordinated homing controller & state machine
+        │   ├── io/          # GPIO mapping, endstop debouncing, tool outputs & status LED
+        │   ├── kinematics/  # Analytical IK/FK solver & safety guard workspace bounds
+        │   ├── motion/      # Motion planner, trapezoidal velocity profiling & trajectory chunking
+        │   ├── stepper/     # Multi-axis stepper driver & timer/PIO pulse generation
+        │   └── main.c       # Dual-core firmware entry point (Core 0: Comm, Core 1: Motion)
         └── CMakeLists.txt   # CMake configuration for Pico SDK
 ```
 
@@ -109,4 +150,4 @@ More documentation and info at
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-Copyright (C) 2020 by [dof2bot.github.io/scara](https://dof2bot.github.io/scara)
+Copyright (C) 2020 - 2026 by [dof2bot.github.io/scara](https://dof2bot.github.io/scara)
