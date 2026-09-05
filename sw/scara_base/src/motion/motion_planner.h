@@ -101,6 +101,18 @@ void motion_planner_set_current_pose(const scara_pose_t *pose);
 bool motion_planner_move_linear(const scara_waypoint_t *target);
 
 /**
+ * @brief Sets the global real-time feedrate override factor.
+ * @param factor Speed scaling factor (e.g. 0.5 for 50%, 1.0 for 100%).
+ */
+void motion_planner_set_override(float factor);
+
+/**
+ * @brief Returns the active global feedrate override factor.
+ * @return Current multiplier float.
+ */
+float motion_planner_get_override(void);
+
+/**
  * @brief Generates a DMA command chunk for PIO from segment [p1 -> p2].
  *
  * @param p1 Starting pose.

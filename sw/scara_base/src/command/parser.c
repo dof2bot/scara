@@ -69,6 +69,12 @@ static const char CMD_FMT_PUMP[] =
     "<CMD:PUMP#%d>";
 static const char CMD_FMT_VALVE[] =
     "<CMD:VALVE#%d>";
+static const char CMD_FMT_WAIT[] =
+    "<CMD:WAIT#%u>";
+static const char CMD_FMT_WAIT_ALT[] =
+    "<wait#%u>";
+static const char CMD_FMT_OVERRIDE[] =
+    "<CMD:OVERRIDE#%u>";
 static const char CMD_FMT_WAYPOINT_5D[] =
     "<pt#%f#%f#%f#%f#%f#end>";
 static const char CMD_FMT_WAYPOINT_4D[] =
@@ -297,6 +303,23 @@ static bool parse_packet_string(const char *pkt, scara_command_t *out_cmd) {
   if (sscanf(pkt, CMD_FMT_VALVE, &valve_val) == 1) {
     out_cmd->type = CMD_TYPE_VALVE;
     out_cmd->data.tool.enable = (valve_val != 0);
+    return true;
+  }
+
+  /* Check for WAIT: <CMD:WAIT#ms> or <wait#ms> */
+  unsigned int wait_ms;
+  if (sscanf(pkt, CMD_FMT_WAIT, &wait_ms) == 1 ||
+      sscanf(pkt, CMD_FMT_WAIT_ALT, &wait_ms) == 1) {
+    out_cmd->type = CMD_TYPE_WAIT;
+    out_cmd->data.wait.delay_ms = (uint32_t)wait_ms;
+    return true;
+  }
+
+  /* Check for OVERRIDE: <CMD:OVERRIDE#val> */
+  unsigned int ovr_val;
+  if (sscanf(pkt, CMD_FMT_OVERRIDE, &ovr_val) == 1) {
+    out_cmd->type = CMD_TYPE_OVERRIDE;
+    out_cmd->data.override.percent = (uint8_t)(ovr_val > 200 ? 200 : ovr_val);
     return true;
   }
 

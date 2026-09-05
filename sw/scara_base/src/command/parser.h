@@ -57,7 +57,9 @@ typedef enum {
   CMD_TYPE_RESUME,       /* <CMD:RESUME> */
   CMD_TYPE_JOG,          /* <CMD:JOG#axis#step> */
   CMD_TYPE_PUMP,         /* <CMD:PUMP#1> or <CMD:PUMP#0> */
-  CMD_TYPE_VALVE         /* <CMD:VALVE#1> or <CMD:VALVE#0> */
+  CMD_TYPE_VALVE,        /* <CMD:VALVE#1> or <CMD:VALVE#0> */
+  CMD_TYPE_WAIT,         /* <CMD:WAIT#ms> or <wait#ms> */
+  CMD_TYPE_OVERRIDE      /* <CMD:OVERRIDE#val> */
 } scara_cmd_type_t;
 
 /**
@@ -74,6 +76,20 @@ typedef struct {
 typedef struct {
   bool enable; /* true to turn on/open, false to turn off/close */
 } scara_tool_cmd_t;
+
+/**
+ * @brief Dwell delay wait parameters.
+ */
+typedef struct {
+  uint32_t delay_ms;
+} scara_wait_cmd_t;
+
+/**
+ * @brief Real-time feedrate override scaling parameters.
+ */
+typedef struct {
+  uint8_t percent; /* 1 - 200 % */
+} scara_override_cmd_t;
 
 /**
  * @brief Dynamics & acceleration configuration parameters.
@@ -136,6 +152,8 @@ typedef struct {
     scara_elbow_cmd_t elbow;
     scara_jog_cmd_t jog;
     scara_tool_cmd_t tool;
+    scara_wait_cmd_t wait;
+    scara_override_cmd_t override;
   } data;
 } scara_command_t;
 

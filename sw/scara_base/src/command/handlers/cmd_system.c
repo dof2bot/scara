@@ -22,6 +22,7 @@
 #include "motion/motion_planner.h"
 #include "stepper/stepper_driver.h"
 #include "trajectory_queue.h"
+#include "pico/time.h"
 #include <stdio.h>
 
 /* System response literals */
@@ -99,6 +100,19 @@ static void handle_home(void) {
   printf("%s", RESP_ACK_HOMING_STARTED);
 }
 
+static void handle_override(const scara_command_t *cmd) {
+  uint8_t pct = cmd->data.override.percent;
+  float factor = (float)pct / 100.0f;
+  motion_planner_set_override(factor);
+  printf("<RESP:ACK#OVERRIDE=%u>\n", (unsigned int)pct);
+}
+
+static void handle_wait(const scara_command_t *cmd) {
+  stepper_driver_wait_idle();
+  sleep_ms(cmd->data.wait.delay_ms);
+  printf("<RESP:ACK#WAIT_DONE#MS=%u>\n", (unsigned int)cmd->data.wait.delay_ms);
+}
+
 bool cmd_system_handle(const scara_command_t *cmd) {
   if (!cmd) {
     return false;
@@ -131,6 +145,14 @@ bool cmd_system_handle(const scara_command_t *cmd) {
 
   case CMD_TYPE_HOME:
     handle_home();
+    return true;
+
+  case CMD_TYPE_OVERRIDE:
+    handle_override(cmd);
+    return true;
+
+  case CMD_TYPE_WAIT:
+    handle_wait(cmd);
     return true;
 
   default:

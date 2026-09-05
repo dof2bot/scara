@@ -88,11 +88,13 @@ The firmware runs a **dual-core architecture**:
 <CMD:SET_ELBOW#RIGHT>                    # Select Right-arm (elbow right) inverse kinematics configuration
 <CMD:GET_ELBOW>                          # Read current elbow configuration
 
-# End-Effector Tool Control
+# End-Effector Tool & Real-Time Control
 <CMD:PUMP#1>                             # Turn ON vacuum/pump actuator
 <CMD:PUMP#0>                             # Turn OFF vacuum/pump actuator
 <CMD:VALVE#1>                            # Open air release valve
 <CMD:VALVE#0>                            # Close air release valve
+<CMD:WAIT#ms>                            # Dwell delay pause for ms milliseconds
+<CMD:OVERRIDE#percent>                   # Dynamic feedrate velocity scaling (10 to 200 %)
 
 # Runtime Configuration & Flash Persistence
 <CMD:GET_CONFIG>                         # Read runtime configuration (link lengths, limits, dynamics, speeds)
@@ -103,6 +105,21 @@ The firmware runs a **dual-core architecture**:
 <CMD:SET_STEPS#GR_J1=..#GR_J2=..#GR_J4=..#LEAD_Z=..>                     # Configure gear ratios and Z lead
 <CMD:SAVE_CONFIG>                        # Save active configuration into on-board Flash (with CRC32 check)
 <CMD:RESET_CONFIG>                       # Restore factory default configuration parameters
+```
+
+#### Serial Response Reference
+
+```text
+<RESP:ACK#QUEUE=n>                       # Waypoint accepted; n buffer slots remaining
+<RESP:MOVE_START#X=..#Y=..#Z=..#PHI=..>  # Physical waypoint execution initiated
+<RESP:MOVE_DONE#X=..#Y=..#Z=..#PHI=..>   # Physical waypoint execution completed
+<RESP:ACK#WAIT_DONE#MS=ms>               # Hardware dwell delay completed
+<RESP:ACK#PUMP_ON> / <RESP:ACK#PUMP_OFF> # Pump actuation acknowledged
+<RESP:ACK#VALVE_ON> / <RESP:ACK#VALVE_OFF> # Valve actuation acknowledged
+<RESP:ACK#OVERRIDE=percent>              # Velocity override scaling updated
+<RESP:HOMED_SUCCESS#X=..#Y=..#Z=..#PHI=..> # Homing cycle completed successfully
+<RESP:NACK_BUFFER_FULL>                  # Input ring buffer saturated
+<RESP:NACK_ESTOP_ACTIVE>                 # Emergency stop active; commands rejected
 ```
 
 ### Dependencies

@@ -35,6 +35,7 @@ static scara_pose_t current_cartesian_pose = {
 };
 
 static scara_elbow_config_t active_elbow_config = SCARA_ELBOW_RIGHT;
+static float feedrate_override = 1.0f;
 
 static const char RESP_TELEM_FMT[] =
     "<TELEM#X=%.2f#Y=%.2f#Z=%.2f#PHI=%.2f#J1=%ld#J2=%ld#Z_STEP=%ld#J4=%ld>\n";
@@ -54,6 +55,19 @@ void motion_planner_set_elbow_config(scara_elbow_config_t config) {
 
 scara_elbow_config_t motion_planner_get_elbow_config(void) {
   return active_elbow_config;
+}
+
+void motion_planner_set_override(float factor) {
+  if (factor < 0.05f) {
+    factor = 0.05f;
+  } else if (factor > 2.0f) {
+    factor = 2.0f;
+  }
+  feedrate_override = factor;
+}
+
+float motion_planner_get_override(void) {
+  return feedrate_override;
 }
 
 scara_step_coords_t motion_planner_joints_to_steps(const scara_joints_t *joints
@@ -142,6 +156,7 @@ bool motion_planner_move_linear(const scara_waypoint_t *target) {
   float def_spd = (cfg->default_speed > 0.1f) ? cfg->default_speed
                                               : SCARA_DEFAULT_SPEED_MM_S;
   float speed = (target->speed > 0.1f) ? target->speed : def_spd;
+  speed *= feedrate_override;
 
   /* Scale Cartesian speed smoothly near singularities */
   float speed_scale = safety_guard_get_speed_scaling(final_joints.theta2);
